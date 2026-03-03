@@ -2,8 +2,8 @@ use serde::Serialize;
 
 use crate::error::ProtocolError;
 
-/// Maximum allowed message size (16 MB).
-pub const MAX_MESSAGE_SIZE: u32 = 16 * 1024 * 1024;
+/// Maximum allowed message size (10 MB).
+pub const MAX_MESSAGE_SIZE: u32 = 10 * 1024 * 1024;
 
 /// Write a length-prefixed MessagePack message to a QUIC send stream.
 ///

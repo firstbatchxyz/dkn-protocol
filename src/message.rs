@@ -152,6 +152,9 @@ pub struct ModelRegistryEntry {
     pub hf_repo: String,
     pub hf_file: String,
     pub model_type: ModelType,
+    /// Optional multimodal projector GGUF filename within the same repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hf_mmproj_file: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +326,7 @@ mod tests {
                 hf_repo: "repo/model".into(),
                 hf_file: "model.gguf".into(),
                 model_type: ModelType::Text,
+                hf_mmproj_file: None,
             }],
         };
         let packed = rmp_serde::to_vec(&msg).unwrap();

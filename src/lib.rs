@@ -13,4 +13,4 @@ pub use message::{
     RouterMessage, TaskStats, ValidationRequest,
 };
 pub use proof::{InferenceProof, TokenLogprob};
-pub use template::{ChatMessage, MessageContent};
+pub use template::{ChatMessage, ContentPart, MessageContent};
