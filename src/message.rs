@@ -37,6 +37,24 @@ pub enum NodeMessage {
         signature: Vec<u8>,
         recovery_id: u8,
     },
+    /// A single streamed token for a task.
+    StreamToken {
+        task_id: Uuid,
+        token: String,
+        index: u32,
+    },
+    /// Final message for a streamed task.
+    StreamEnd {
+        task_id: Uuid,
+        text: String,
+        stats: TaskStats,
+        proof: Option<InferenceProof>,
+    },
+    /// Error during a streamed task.
+    StreamError {
+        task_id: Uuid,
+        error: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +72,8 @@ pub enum RouterMessage {
         max_tokens: u32,
         temperature: f32,
         validation: Option<ValidationRequest>,
+        #[serde(default)]
+        stream: bool,
     },
     /// Challenge for proof-of-liveness.
     Challenge { challenge: [u8; 32] },
@@ -179,12 +199,14 @@ mod tests {
             max_tokens: 512,
             temperature: 0.7,
             validation: None,
+            stream: false,
         };
         let packed = rmp_serde::to_vec(&msg).unwrap();
         let roundtrip: RouterMessage = rmp_serde::from_slice(&packed).unwrap();
         match roundtrip {
-            RouterMessage::TaskAssignment { model, .. } => {
+            RouterMessage::TaskAssignment { model, stream, .. } => {
                 assert_eq!(model, "gemma3:4b");
+                assert!(!stream);
             }
             _ => panic!("wrong variant"),
         }
@@ -311,6 +333,121 @@ mod tests {
             RouterMessage::ModelRegistryUpdate { entries } => {
                 assert_eq!(entries.len(), 1);
                 assert_eq!(entries[0].name, "test:1b");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_task_assignment_stream_true_roundtrip() {
+        let msg = RouterMessage::TaskAssignment {
+            task_id: Uuid::nil(),
+            model: "gemma3:4b".into(),
+            messages: vec![],
+            max_tokens: 100,
+            temperature: 0.5,
+            validation: None,
+            stream: true,
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: RouterMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            RouterMessage::TaskAssignment { stream, .. } => assert!(stream),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_task_assignment_backward_compat_json() {
+        // Old format without `stream` field should deserialize to stream: false
+        let json = serde_json::json!({
+            "TaskAssignment": {
+                "task_id": "00000000-0000-0000-0000-000000000000",
+                "model": "gemma3:4b",
+                "messages": [],
+                "max_tokens": 100,
+                "temperature": 0.7,
+                "validation": null
+            }
+        });
+        let roundtrip: RouterMessage = serde_json::from_value(json).unwrap();
+        match roundtrip {
+            RouterMessage::TaskAssignment { stream, .. } => assert!(!stream),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_stream_token_roundtrip() {
+        let msg = NodeMessage::StreamToken {
+            task_id: Uuid::nil(),
+            token: "Hello".into(),
+            index: 0,
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: NodeMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            NodeMessage::StreamToken { token, index, .. } => {
+                assert_eq!(token, "Hello");
+                assert_eq!(index, 0);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_stream_end_roundtrip() {
+        let msg = NodeMessage::StreamEnd {
+            task_id: Uuid::nil(),
+            text: "Hello world".into(),
+            stats: TaskStats {
+                tokens_generated: 2,
+                prompt_tokens: 10,
+                generation_time_ms: 500,
+                tokens_per_second: 4.0,
+            },
+            proof: None,
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: NodeMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            NodeMessage::StreamEnd { text, stats, .. } => {
+                assert_eq!(text, "Hello world");
+                assert_eq!(stats.tokens_generated, 2);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_stream_error_roundtrip() {
+        let msg = NodeMessage::StreamError {
+            task_id: Uuid::nil(),
+            error: "inference failed".into(),
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: NodeMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            NodeMessage::StreamError { error, .. } => {
+                assert_eq!(error, "inference failed");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_stream_token_json_roundtrip() {
+        let msg = NodeMessage::StreamToken {
+            task_id: Uuid::nil(),
+            token: "tok".into(),
+            index: 5,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let roundtrip: NodeMessage = serde_json::from_str(&json).unwrap();
+        match roundtrip {
+            NodeMessage::StreamToken { token, index, .. } => {
+                assert_eq!(token, "tok");
+                assert_eq!(index, 5);
             }
             _ => panic!("wrong variant"),
         }

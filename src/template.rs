@@ -200,6 +200,6 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let roundtrip: ChatMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(roundtrip.role, "user");
-        assert_eq!(roundtrip.content, "hello");
+        assert_eq!(roundtrip.content.to_string(), "hello");
     }
 }
