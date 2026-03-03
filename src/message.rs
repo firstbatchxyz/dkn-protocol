@@ -151,7 +151,6 @@ pub struct ModelRegistryEntry {
     pub name: String,
     pub hf_repo: String,
     pub hf_file: String,
-    pub chat_template: Option<String>,
     pub model_type: ModelType,
 }
 
@@ -323,7 +322,6 @@ mod tests {
                 name: "test:1b".into(),
                 hf_repo: "repo/model".into(),
                 hf_file: "model.gguf".into(),
-                chat_template: Some("chatml".into()),
                 model_type: ModelType::Text,
             }],
         };
