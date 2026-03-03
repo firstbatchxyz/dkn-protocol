@@ -117,6 +117,14 @@ pub struct NodeStatsSnapshot {
     pub uptime_secs: u64,
 }
 
+/// Modality supported by a model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModelType {
+    Text,
+    Vision,
+    Audio,
+}
+
 /// A model entry from the router's registry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelRegistryEntry {
@@ -124,6 +132,7 @@ pub struct ModelRegistryEntry {
     pub hf_repo: String,
     pub hf_file: String,
     pub chat_template: Option<String>,
+    pub model_type: ModelType,
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +302,7 @@ mod tests {
                 hf_repo: "repo/model".into(),
                 hf_file: "model.gguf".into(),
                 chat_template: Some("chatml".into()),
+                model_type: ModelType::Text,
             }],
         };
         let packed = rmp_serde::to_vec(&msg).unwrap();
