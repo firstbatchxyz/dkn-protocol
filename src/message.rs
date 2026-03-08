@@ -55,6 +55,11 @@ pub enum NodeMessage {
         task_id: Uuid,
         error: String,
     },
+    /// Result of a validation task.
+    ValidationResult {
+        validation_id: Uuid,
+        proof: InferenceProof,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +87,16 @@ pub enum RouterMessage {
     /// Updated model registry from the router.
     ModelRegistryUpdate {
         entries: Vec<ModelRegistryEntry>,
+    },
+    /// A validation task: prefill-only forward pass to verify a prior inference.
+    ValidationTask {
+        validation_id: Uuid,
+        model: String,
+        messages: Vec<ChatMessage>,
+        output_text: String,
+        /// Extract logprobs every N tokens (matching the original inference).
+        logprob_every_n: usize,
+        logprob_top_k: usize,
     },
 }
 
@@ -121,8 +136,8 @@ pub struct Capacity {
 /// Optional validation parameters included with a task.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationRequest {
-    /// Token positions at which to extract logprobs.
-    pub logprob_positions: Vec<usize>,
+    /// Extract logprobs every N tokens (e.g. 32 → positions [0, 32, 64, ...]).
+    pub logprob_every_n: usize,
     /// Top-k alternatives to collect at each logprob position.
     pub logprob_top_k: usize,
 }
@@ -432,6 +447,73 @@ mod tests {
         match roundtrip {
             NodeMessage::StreamError { error, .. } => {
                 assert_eq!(error, "inference failed");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_validation_task_roundtrip() {
+        let msg = RouterMessage::ValidationTask {
+            validation_id: Uuid::nil(),
+            model: "gemma3:4b".into(),
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "hello".into(),
+            }],
+            output_text: "world".into(),
+            logprob_every_n: 32,
+            logprob_top_k: 5,
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: RouterMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            RouterMessage::ValidationTask {
+                validation_id,
+                model,
+                output_text,
+                logprob_every_n,
+                logprob_top_k,
+                ..
+            } => {
+                assert_eq!(validation_id, Uuid::nil());
+                assert_eq!(model, "gemma3:4b");
+                assert_eq!(output_text, "world");
+                assert_eq!(logprob_every_n, 32);
+                assert_eq!(logprob_top_k, 5);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_validation_result_roundtrip() {
+        use crate::proof::{InferenceProof, TokenLogprob};
+
+        let proof = InferenceProof {
+            logprobs: vec![TokenLogprob {
+                position: 0,
+                token_id: 42,
+                token_text: "hi".into(),
+                logprob: -0.3,
+                top_k: vec![],
+            }],
+            kv_cache_hash: None,
+        };
+        let msg = NodeMessage::ValidationResult {
+            validation_id: Uuid::nil(),
+            proof,
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: NodeMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            NodeMessage::ValidationResult {
+                validation_id,
+                proof,
+            } => {
+                assert_eq!(validation_id, Uuid::nil());
+                assert_eq!(proof.logprobs.len(), 1);
+                assert_eq!(proof.logprobs[0].token_id, 42);
             }
             _ => panic!("wrong variant"),
         }
