@@ -79,6 +79,8 @@ pub enum RouterMessage {
         validation: Option<ValidationRequest>,
         #[serde(default)]
         stream: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response_format: Option<ResponseFormat>,
     },
     /// Challenge for proof-of-liveness.
     Challenge { challenge: [u8; 32] },
@@ -131,6 +133,25 @@ pub struct Capacity {
     pub free: usize,
     /// Maximum concurrent inference slots.
     pub max: usize,
+}
+
+/// Structured output constraint (OpenAI-compatible `response_format`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ResponseFormat {
+    /// Force valid JSON output.
+    #[serde(rename = "json_object")]
+    JsonObject,
+    /// Force output matching a specific JSON schema.
+    #[serde(rename = "json_schema")]
+    JsonSchema { json_schema: JsonSchemaSpec },
+}
+
+/// A named JSON schema for structured output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonSchemaSpec {
+    pub name: String,
+    pub schema: serde_json::Value,
 }
 
 /// Optional validation parameters included with a task.
@@ -217,6 +238,7 @@ mod tests {
             temperature: 0.7,
             validation: None,
             stream: false,
+            response_format: None,
         };
         let packed = rmp_serde::to_vec(&msg).unwrap();
         let roundtrip: RouterMessage = rmp_serde::from_slice(&packed).unwrap();
@@ -365,6 +387,7 @@ mod tests {
             temperature: 0.5,
             validation: None,
             stream: true,
+            response_format: None,
         };
         let packed = rmp_serde::to_vec(&msg).unwrap();
         let roundtrip: RouterMessage = rmp_serde::from_slice(&packed).unwrap();
@@ -515,6 +538,93 @@ mod tests {
                 assert_eq!(proof.logprobs.len(), 1);
                 assert_eq!(proof.logprobs[0].token_id, 42);
             }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_task_assignment_response_format_json_object_roundtrip() {
+        let msg = RouterMessage::TaskAssignment {
+            task_id: Uuid::nil(),
+            model: "gemma3:4b".into(),
+            messages: vec![],
+            max_tokens: 100,
+            temperature: 0.7,
+            validation: None,
+            stream: false,
+            response_format: Some(ResponseFormat::JsonObject),
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: RouterMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            RouterMessage::TaskAssignment {
+                response_format, ..
+            } => {
+                assert!(matches!(response_format, Some(ResponseFormat::JsonObject)));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_task_assignment_response_format_json_schema_roundtrip() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "age": { "type": "integer" }
+            },
+            "required": ["name", "age"]
+        });
+        let msg = RouterMessage::TaskAssignment {
+            task_id: Uuid::nil(),
+            model: "gemma3:4b".into(),
+            messages: vec![],
+            max_tokens: 100,
+            temperature: 0.7,
+            validation: None,
+            stream: false,
+            response_format: Some(ResponseFormat::JsonSchema {
+                json_schema: JsonSchemaSpec {
+                    name: "person".into(),
+                    schema: schema.clone(),
+                },
+            }),
+        };
+        let packed = rmp_serde::to_vec(&msg).unwrap();
+        let roundtrip: RouterMessage = rmp_serde::from_slice(&packed).unwrap();
+        match roundtrip {
+            RouterMessage::TaskAssignment {
+                response_format, ..
+            } => match response_format {
+                Some(ResponseFormat::JsonSchema { json_schema }) => {
+                    assert_eq!(json_schema.name, "person");
+                    assert_eq!(json_schema.schema, schema);
+                }
+                _ => panic!("expected JsonSchema"),
+            },
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_task_assignment_backward_compat_no_response_format() {
+        // Old format without `response_format` field should deserialize to None
+        let json = serde_json::json!({
+            "TaskAssignment": {
+                "task_id": "00000000-0000-0000-0000-000000000000",
+                "model": "gemma3:4b",
+                "messages": [],
+                "max_tokens": 100,
+                "temperature": 0.7,
+                "validation": null
+            }
+        });
+        let roundtrip: RouterMessage = serde_json::from_value(json).unwrap();
+        match roundtrip {
+            RouterMessage::TaskAssignment {
+                response_format, ..
+            } => assert!(response_format.is_none()),
             _ => panic!("wrong variant"),
         }
     }
